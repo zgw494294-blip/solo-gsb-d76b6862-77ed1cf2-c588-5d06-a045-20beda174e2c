@@ -190,3 +190,174 @@ def test_lockable_body_not_json():
         headers={"Content-Type": "text/plain"},
     )
     assert resp.status_code == 400
+
+
+# ---------- /api/acceptance：施工验收复核 ----------
+
+def test_acceptance_pass():
+    resp = client.post(
+        "/api/acceptance",
+        json={
+            "ground": [100, 100, 108, 108, 116, 116],
+            "plan": [100, 100, 108, 108, 116, 116],
+            "measured": [100, 102, 108, 109, 116, 116],
+            "tolerance": 5,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["passed"] is True
+    assert [d["deviation"] for d in data["deviations"]] == [0, 2, 0, 1, 0, 0]
+    assert data["tolerance_violations"] == []
+    assert data["steep_segments"] == []
+    assert data["no_horizontal_windows"] == []
+    assert data["endpoint_mismatches"] == []
+    assert data["tolerance"] == 5
+
+
+def test_acceptance_failure_is_200_not_422():
+    # 实测违规是复核结论（200 + passed=false），不是请求错误
+    resp = client.post(
+        "/api/acceptance",
+        json={
+            "ground": [100, 100, 100],
+            "plan": [100, 100, 100],
+            "measured": [100, 130, 100],
+            "tolerance": 5,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["passed"] is False
+    assert data["tolerance_violations"] == [
+        {"index": 2, "deviation": 30, "limit": 5}
+    ]
+    assert [(s["index"], s["delta"]) for s in data["steep_segments"]] == [
+        (1, 30), (2, -30)
+    ]
+
+
+def test_acceptance_endpoint_mismatch():
+    resp = client.post(
+        "/api/acceptance",
+        json={
+            "ground": [100, 100, 100],
+            "plan": [100, 100, 100],
+            "measured": [101, 100, 100],
+            "tolerance": 20,
+        },
+    )
+    data = resp.json()
+    assert resp.status_code == 200
+    assert data["passed"] is False
+    assert [e["index"] for e in data["endpoint_mismatches"]] == [1]
+
+
+def test_acceptance_no_horizontal_window():
+    resp = client.post(
+        "/api/acceptance",
+        json={
+            "ground": [0, 0, 0, 0, 0, 0, 0],
+            "plan": [0, 0, 0, 0, 0, 0, 0],
+            "measured": [0, 1, 2, 3, 4, 5, 6],
+            "tolerance": 20,
+        },
+    )
+    data = resp.json()
+    assert data["passed"] is False
+    assert [w["segment_indices"] for w in data["no_horizontal_windows"]] == [
+        [1, 2, 3, 4, 5], [2, 3, 4, 5, 6]
+    ]
+
+
+def test_acceptance_invalid_frozen_plan_is_422():
+    # 冻结方案本身不合法（相邻高差 9 cm）→ 422，且不产生复核报告
+    resp = client.post(
+        "/api/acceptance",
+        json={
+            "ground": [100, 100, 109],
+            "plan": [100, 100, 109],
+            "measured": [100, 100, 109],
+            "tolerance": 5,
+        },
+    )
+    assert resp.status_code == 422
+    assert resp.json()["feasible"] is False
+    assert "高差" in resp.json()["reason"]
+
+
+def test_acceptance_plan_length_mismatch_is_422():
+    resp = client.post(
+        "/api/acceptance",
+        json={
+            "ground": [100, 100, 100],
+            "plan": [100, 100],
+            "measured": [100, 100],
+            "tolerance": 5,
+        },
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"plan": [100, 100, 100], "measured": [100, 100, 100], "tolerance": 5},
+        {"ground": [100, 100, 100], "measured": [100, 100, 100], "tolerance": 5},
+        {"ground": [100, 100, 100], "plan": [100, 100, 100], "tolerance": 5},
+        {"ground": [100, 100, 100], "plan": [100, 100, 100],
+         "measured": [100, 100, 100]},
+    ],
+)
+def test_acceptance_missing_fields_400(payload):
+    resp = client.post("/api/acceptance", json=payload)
+    assert resp.status_code == 400
+
+
+def test_acceptance_body_not_json():
+    resp = client.post(
+        "/api/acceptance", content="not-json",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("tol", [-1, 21, 1.5, "5", None, True])
+def test_acceptance_invalid_tolerance_422(tol):
+    resp = client.post(
+        "/api/acceptance",
+        json={
+            "ground": [100, 100, 100],
+            "plan": [100, 100, 100],
+            "measured": [100, 100, 100],
+            "tolerance": tol,
+        },
+    )
+    assert resp.status_code == 422
+    assert "容差" in resp.json()["reason"]
+
+
+def test_acceptance_measured_invalid_422():
+    resp = client.post(
+        "/api/acceptance",
+        json={
+            "ground": [100, 100, 100],
+            "plan": [100, 100, 100],
+            "measured": [100, 201, 100],
+            "tolerance": 5,
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_acceptance_against_live_plan():
+    # 端到端：/api/plan 的输出可直接作为冻结方案送入复核
+    ground = [100, 107, 114, 119, 124, 130]
+    plan_resp = client.post("/api/plan", json={"ground": ground, "width": 1.5})
+    plan = plan_resp.json()["plan"]
+    resp = client.post(
+        "/api/acceptance",
+        json={"ground": ground, "plan": plan, "measured": plan, "tolerance": 0},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["passed"] is True

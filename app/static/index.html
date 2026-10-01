@@ -15,6 +15,7 @@
     --accent-dark: #1b5e20;
     --ground: #8d6e63;
     --plan: #2e7d32;
+    --measured: #ef6c00;
     --horiz: #1565c0;
     --danger-bg: #fdecea;
     --danger-ink: #b3261e;
@@ -161,6 +162,45 @@
   .ew-net-pos { color: #c62828; }
   .ew-net-neg { color: #1565c0; }
   .flow-arrow { color: var(--muted); }
+
+  /* 施工验收 */
+  .swatch.measured { border-top: 3px solid var(--measured); }
+  .acc-status { font-size: 13px; margin-left: auto; color: var(--muted); }
+  .acc-status.frozen { color: var(--accent-dark); font-weight: 600; }
+  .acc-frozen-tag {
+    display: inline-block; font-size: 12px; border-radius: 10px;
+    padding: 1px 10px; margin-bottom: 8px;
+    background: #e8f5e9; color: var(--accent-dark); border: 1px solid #b6dcb9;
+  }
+  .acc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .acc-grid { grid-template-columns: 1fr; } }
+  table.inputs input.acc-input { width: 68px; }
+  table.inputs input.acc-input.bad { border-color: #f3c7c3; background: #fdecea; }
+  .tol-box {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--ink);
+  }
+  .tol-box input[type="number"] {
+    width: 72px; padding: 5px 6px;
+    border: 1px solid var(--line); border-radius: 6px;
+    font-size: 14px; text-align: center;
+  }
+  .tol-box input[type="number"]:focus { outline: 2px solid #a5d6a7; border-color: var(--accent); }
+  .tol-box input.bad { border-color: #f3c7c3; background: #fdecea; }
+  .review-banner {
+    border-radius: 8px; padding: 10px 14px; font-size: 13px;
+    margin: 10px 0; border: 1px solid transparent; display: none;
+  }
+  .review-banner.show { display: block; }
+  .review-banner.pass { background: #e8f5e9; color: var(--accent-dark); border-color: #b6dcb9; }
+  .review-banner.fail { background: var(--danger-bg); color: var(--danger-ink); border-color: #f3c7c3; }
+  .review-banner.error { background: var(--danger-bg); color: var(--danger-ink); border-color: #f3c7c3; }
+  .review-banner.confirmed { background: #e3f2fd; color: #0d47a1; border-color: #b6d4f5; }
+  .viol-block { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; }
+  .viol-block li { margin: 2px 0; }
+  td.dev-pos { color: #c62828; }
+  td.dev-neg { color: #1565c0; }
+  td.bad-cell { background: #fdecea; font-weight: 600; }
   footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
 </style>
 </head>
@@ -206,6 +246,7 @@
       <div class="legend">
         <span><i class="swatch dashed"></i>地面坡线</span>
         <span><i class="swatch solid"></i>方案坡线</span>
+        <span><i class="swatch measured"></i>实测坡线（冻结方案后）</span>
         <span><i class="swatch level"></i>水平段（方案高差 0）</span>
       </div>
     </div>
@@ -264,6 +305,66 @@
     <p class="hint" id="ewNote"></p>
   </section>
 
+  <section class="card" id="acceptanceCard">
+    <h2>施工验收复核
+      <span class="tag">冻结当前可行方案后录入实测标高与容差（0～20 整数厘米），只核对偏差，不重新求优</span>
+      <span class="acc-status" id="accStatus">尚未冻结方案</span>
+    </h2>
+
+    <div class="toolbar">
+      <button id="btnFreeze" class="primary" disabled>冻结当前方案</button>
+      <span class="point-count" id="freezeHint">方案计算完成且与当前地面、净宽一致时方可冻结</span>
+    </div>
+
+    <div id="frozenPanel" hidden>
+      <span class="acc-frozen-tag" id="frozenTag"></span>
+      <div class="acc-grid">
+        <div>
+          <p class="sub-title">实测标高录入（cm，0～200 整数；数量与冻结方案一致）</p>
+          <div class="editor-wrap">
+            <table class="inputs">
+              <thead><tr id="accHeadRow"></tr></thead>
+              <tbody><tr id="accInputRow"></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <p class="sub-title">复核设置</p>
+          <label class="tol-box">
+            允许偏差（容差）
+            <input id="tolInput" type="number" min="0" max="20" step="1" value="5">
+            <span class="unit">厘米（0～20 整数）</span>
+          </label>
+          <p class="hint">逐点核对：偏差＝实测−方案；另复核实测相邻高差 ≤ 8 cm、任意连续 5 段至少 1 段水平、首尾与方案一致。全部无违规才通过。</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button id="btnReview">重新复核</button>
+        <button id="btnConfirm" disabled>确认验收</button>
+      </div>
+
+      <div id="reviewBanner" class="review-banner"></div>
+
+      <div id="reviewReport" hidden>
+        <div class="acc-grid">
+          <div>
+            <p class="sub-title">逐点偏差（cm，实测−方案；红色底为超容差点）</p>
+            <table class="data">
+              <thead><tr><th>测点</th><th>方案</th><th>实测</th><th>偏差</th></tr></thead>
+              <tbody id="devBody"></tbody>
+            </table>
+          </div>
+          <div>
+            <p class="sub-title">违规明细</p>
+            <div id="violBody"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="hint" id="accHint">编辑实测或容差会立即清空复核报告并撤销确认；修改地面标高或净宽将废弃冻结方案与实测，需重新冻结。</p>
+  </section>
+
   <footer>目标：总调整量最小；总调整量相同时，取方案标高序列字典序最小者。</footer>
 </main>
 
@@ -271,12 +372,26 @@
 "use strict";
 
 const N_MIN = 3, N_MAX = 16, H_MIN = 0, H_MAX = 200;
-const W_MIN = 0.5, W_MAX = 10;
+const W_MIN = 0.5, W_MAX = 10, TOL_MIN = 0, TOL_MAX = 20;
 let ground = [100, 107, 114, 119, 124, 130];
 let lastResult = null;
 let lastLockable = null;
 let debounceTimer = null;
 let calcSeq = 0;
+
+/* ---------- 施工验收状态 ----------
+   frozenSig：冻结时的地面/净宽/方案签名，方案响应与之不同即视为过期；
+   frozenPlan/frozenGround/frozenWidth 为冻结快照；measured 为实测录入；
+   reviewSeq 用于丢弃迟到的复核响应。任何确认都以最新复核通过为前提。 */
+let frozenSig = null;
+let frozenPlan = null;
+let frozenGround = null;
+let frozenWidth = null;
+let measured = [];
+let reviewResult = null;
+let confirmed = false;
+let reviewSeq = 0;
+let reviewTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -346,8 +461,323 @@ function loadSample() {
 }
 
 function scheduleCalc() {
+  // 修改地面或净宽即废弃冻结方案与实测（旧实测、报告、确认一并清除）。
+  invalidateFreeze();
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(calculate, 250);
+}
+
+/* ---------- 施工验收：冻结 / 失效 / 复核 ---------- */
+
+function currentSig(r, w) {
+  return JSON.stringify({ g: ground, w: w, p: r.plan });
+}
+
+function invalidateFreeze() {
+  frozenSig = null;
+  frozenPlan = null;
+  frozenGround = null;
+  frozenWidth = null;
+  measured = [];
+  clearReview();
+  renderFreezeState();
+}
+
+function clearReview() {
+  // 立即清空报告、撤销确认，并使在途复核响应失效（迟到响应不能恢复）。
+  reviewSeq++;
+  clearTimeout(reviewTimer);
+  reviewResult = null;
+  confirmed = false;
+  renderReviewState();
+}
+
+function canFreeze(r, widthInfo) {
+  return !!(r && widthInfo.ok && r.feasible &&
+            JSON.stringify(r.ground) === JSON.stringify(ground) &&
+            r.width === widthInfo.value);
+}
+
+function freezePlan() {
+  const widthInfo = readWidth();
+  if (!canFreeze(lastResult, widthInfo)) return;
+  // 重新冻结：清除旧实测、报告与确认，实测先按方案标高预填。
+  frozenPlan = lastResult.plan.slice();
+  frozenGround = ground.slice();
+  frozenWidth = widthInfo.value;
+  frozenSig = JSON.stringify({ g: frozenGround, w: frozenWidth, p: frozenPlan });
+  measured = frozenPlan.slice();
+  reviewResult = null;
+  confirmed = false;
+  $("tolInput").value = "5";
+  $("tolInput").classList.remove("bad");
+  renderFreezeState();
+  drawChart(lastResult);
+  scheduleReview();
+}
+
+function renderFreezeState() {
+  const widthInfo = readWidth();
+  const freezable = canFreeze(lastResult, widthInfo);
+  $("btnFreeze").disabled = !freezable || frozenSig !== null;
+  $("freezeHint").textContent = frozenSig !== null
+    ? "已冻结；修改地面或净宽后需重新冻结（旧实测与报告会被清除）"
+    : (freezable
+        ? "冻结后即可在下方录入实测标高与容差"
+        : "方案计算完成且与当前地面、净宽一致时方可冻结");
+
+  const status = $("accStatus");
+  status.textContent = frozenSig !== null ? "已冻结方案" : "尚未冻结方案";
+  status.className = "acc-status" + (frozenSig !== null ? " frozen" : "");
+
+  $("frozenPanel").hidden = frozenSig === null;
+  if (frozenSig !== null) {
+    $("frozenTag").textContent =
+      "冻结方案：" + frozenPlan.length + " 个测点 · 净宽 " +
+      fmtNum(frozenWidth, 2) + " 米 · 方案 [" + frozenPlan.join(", ") + "]";
+    renderMeasuredInputs();
+  }
+}
+
+function renderMeasuredInputs() {
+  const head = $("accHeadRow");
+  const row = $("accInputRow");
+  head.innerHTML = "";
+  row.innerHTML = "";
+  frozenPlan.forEach((p, i) => {
+    const th = document.createElement("th");
+    th.textContent = "测点" + (i + 1);
+    head.appendChild(th);
+
+    const td = document.createElement("td");
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.min = H_MIN; inp.max = H_MAX; inp.step = 1;
+    inp.className = "acc-input";
+    inp.value = Number.isFinite(measured[i]) ? measured[i] : "";
+    inp.dataset.index = i;
+    inp.addEventListener("input", onMeasuredEdit);
+    td.appendChild(inp);
+    row.appendChild(td);
+  });
+}
+
+function onMeasuredEdit(e) {
+  const idx = Number(e.target.dataset.index);
+  const raw = e.target.value.trim();
+  measured[idx] = raw === "" ? NaN : Number(raw);
+  e.target.classList.toggle("bad", !Number.isInteger(measured[idx]) ||
+    measured[idx] < H_MIN || measured[idx] > H_MAX);
+  // 编辑实测立即清空报告、撤销确认，再安排新的复核。
+  clearReview();
+  drawChart(lastResult);
+  scheduleReview();
+}
+
+function onToleranceEdit() {
+  // 编辑容差同样立即清空报告、撤销确认。
+  $("tolInput").classList.toggle("bad", !readTolerance().ok);
+  clearReview();
+  scheduleReview();
+}
+
+function readTolerance() {
+  const raw = $("tolInput").value.trim();
+  if (raw === "" || !/^-?\d+$/.test(raw))
+    return { ok: false, reason: "容差必须是 0～20 的整数厘米。" };
+  const t = Number(raw);
+  if (!Number.isInteger(t) || t < TOL_MIN || t > TOL_MAX)
+    return { ok: false, reason: "容差必须在 0～20 整数厘米之间。" };
+  return { ok: true, value: t };
+}
+
+function validateMeasured() {
+  if (measured.length !== frozenPlan.length)
+    return "实测标高数量必须与冻结方案一致。";
+  for (let i = 0; i < measured.length; i++) {
+    const v = measured[i];
+    if (!Number.isInteger(v))
+      return "第 " + (i + 1) + " 个实测标高必须是 0～200 的整数厘米。";
+    if (v < H_MIN || v > H_MAX)
+      return "第 " + (i + 1) + " 个实测标高 " + v + " 超出范围（0～200 厘米）。";
+  }
+  return null;
+}
+
+function scheduleReview() {
+  if (frozenSig === null) return;
+  clearTimeout(reviewTimer);
+  reviewTimer = setTimeout(runReview, 250);
+}
+
+async function runReview() {
+  if (frozenSig === null) return;
+  const seq = ++reviewSeq;
+  const err = validateMeasured();
+  const tolInfo = readTolerance();
+  if (err || !tolInfo.ok) {
+    reviewResult = null;
+    confirmed = false;
+    renderReviewState(err || tolInfo.reason, "error");
+    return;
+  }
+  let data = null, ok = false, failed = false;
+  try {
+    const resp = await fetch("/api/acceptance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ground: frozenGround,
+        plan: frozenPlan,
+        measured: measured,
+        tolerance: tolInfo.value,
+      }),
+    });
+    data = await resp.json();
+    ok = resp.ok;
+  } catch (e) {
+    failed = true;
+  }
+  // 迟到 / 失效响应一律丢弃：不能恢复已清空的报告或启用确认。
+  if (seq !== reviewSeq || frozenSig === null) return;
+  if (failed || !ok) {
+    // 复核输入非法或请求失败：清空报告、撤销并禁用确认，冻结方案保留不变。
+    reviewResult = null;
+    confirmed = false;
+    const reason = failed
+      ? "无法连接复核服务。"
+      : ((data && data.reason) ? data.reason : "复核请求失败。");
+    renderReviewState(reason, "error");
+    return;
+  }
+  reviewResult = data;
+  confirmed = false;   // 每次新报告都需重新确认
+  renderReviewState();
+}
+
+function confirmAcceptance() {
+  if (!reviewResult || !reviewResult.passed) return;
+  confirmed = true;
+  renderReviewState();
+}
+
+function renderReviewState(inlineError, kind) {
+  const banner = $("reviewBanner");
+  const report = $("reviewReport");
+  const btn = $("btnConfirm");
+
+  if (frozenSig === null) {
+    banner.className = "review-banner";
+    banner.textContent = "";
+    report.hidden = true;
+    btn.disabled = true;
+    return;
+  }
+
+  if (inlineError) {
+    banner.className = "review-banner show " + (kind || "error");
+    banner.innerHTML = "<b>无法复核：</b>" + escapeHtml(inlineError);
+    report.hidden = true;
+    btn.disabled = true;
+    return;
+  }
+
+  if (!reviewResult) {
+    banner.className = "review-banner";
+    banner.textContent = "";
+    report.hidden = true;
+    btn.disabled = true;
+    return;
+  }
+
+  report.hidden = false;
+  renderDeviations(reviewResult);
+  renderViolations(reviewResult);
+
+  if (confirmed) {
+    banner.className = "review-banner show confirmed";
+    banner.innerHTML = "<b>验收已确认：</b>当前实测复核通过，施工验收已确认。" +
+      "编辑实测或容差将撤销确认。";
+    btn.disabled = true;
+    return;
+  }
+
+  btn.disabled = !reviewResult.passed;
+  if (reviewResult.passed) {
+    banner.className = "review-banner show pass";
+    banner.innerHTML = "<b>复核通过：</b>全部测点偏差在容差内，" +
+      "无超差、无超限坡段、无缺少水平段窗口，首尾与方案一致，可确认验收。";
+  } else {
+    banner.className = "review-banner show fail";
+    banner.innerHTML = "<b>复核不通过：</b>存在违规项（见右侧明细），" +
+      "修复全部违规后方可确认验收；后端不对实测重新求优。";
+  }
+}
+
+function renderDeviations(r) {
+  const badIdx = {};
+  r.tolerance_violations.forEach(v => { badIdx[v.index] = v.deviation; });
+  const endIdx = {};
+  r.endpoint_mismatches.forEach(v => { endIdx[v.index] = true; });
+  const tb = $("devBody");
+  tb.innerHTML = "";
+  r.deviations.forEach(d => {
+    const tr = document.createElement("tr");
+    const dev = d.deviation;
+    const sign = dev > 0 ? "+" : "";
+    const cls = dev > 0 ? "dev-pos" : (dev < 0 ? "dev-neg" : "");
+    const bad = badIdx[d.index] !== undefined || endIdx[d.index];
+    tr.innerHTML =
+      "<td>" + d.index + "</td>" +
+      "<td>" + d.plan + "</td>" +
+      "<td>" + d.measured + "</td>" +
+      '<td class="' + cls + (bad ? " bad-cell" : "") + '">' +
+        sign + dev + "</td>";
+    tb.appendChild(tr);
+  });
+}
+
+function renderViolations(r) {
+  const box = $("violBody");
+  box.innerHTML = "";
+  const addBlock = (title, items, render) => {
+    const p = document.createElement("p");
+    p.className = "sub-title";
+    p.textContent = title + "（" + items.length + "）";
+    box.appendChild(p);
+    if (items.length === 0) {
+      const none = document.createElement("p");
+      none.className = "hint";
+      none.style.marginTop = "0";
+      none.textContent = "无";
+      box.appendChild(none);
+      return;
+    }
+    const ul = document.createElement("ul");
+    ul.className = "viol-block";
+    items.forEach(it => {
+      const li = document.createElement("li");
+      li.innerHTML = render(it);
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+  };
+
+  addBlock("超容差点（|实测−方案|＞" + r.tolerance + " cm）",
+    r.tolerance_violations,
+    v => "测点" + v.index + "：偏差 " +
+      (v.deviation > 0 ? "+" : "") + v.deviation + " cm，超过容差 " + v.limit + " cm");
+  addBlock("实测高差超过 8 cm 的段",
+    r.steep_segments,
+    s => "第 " + s.index + " 段（测点" + s.from + "→" + s.to + "）：高差 " +
+      (s.delta > 0 ? "+" : "") + s.delta + " cm");
+  addBlock("无水平段的连续 5 段窗口",
+    r.no_horizontal_windows,
+    w => "第 " + w.start_segment + "～" + w.end_segment + " 段连续 5 段均无水平段");
+  addBlock("首尾实测不等于方案的点",
+    r.endpoint_mismatches,
+    p => (p.index === 1 ? "首" : "尾") + "点（测点" + p.index + "）：方案 " +
+      p.plan + " cm，实测 " + p.measured + " cm");
 }
 
 function clientValidate() {
@@ -385,6 +815,7 @@ async function calculate() {
     $("earthworkCard").hidden = true;
     showBanner("error", "<b>非法输入：</b>" + escapeHtml(err || widthInfo.reason));
     drawChart(null);
+    renderFreezeState();
     return;
   }
   try {
@@ -411,6 +842,12 @@ async function calculate() {
       renderResult(data, lastLockable);
       renderEarthwork(data.earthwork);
       drawChart(data);
+      // 冻结时记录的方案若与迟到的新响应不一致，不能借此恢复冻结状态。
+      if (frozenSig !== null && currentSig(data, widthInfo.value) !== frozenSig) {
+        invalidateFreeze();
+      } else {
+        renderFreezeState();
+      }
     } else {
       lastResult = null;
       lastLockable = null;
@@ -419,6 +856,7 @@ async function calculate() {
       const reason = (data && data.reason) ? data.reason : "计算失败。";
       showBanner("warn", "<b>无可行方案：</b>" + escapeHtml(reason));
       drawChart(null);
+      renderFreezeState();
     }
   } catch (e) {
     if (seq !== calcSeq) return;
@@ -428,6 +866,7 @@ async function calculate() {
     $("earthworkCard").hidden = true;
     showBanner("error", "<b>请求失败：</b>无法连接计算服务（" + escapeHtml(String(e)) + "）");
     drawChart(null);
+    renderFreezeState();
   }
 }
 
@@ -592,6 +1031,7 @@ function drawChart(r) {
   const n = ground.length;
   const values = ground.filter(v => Number.isFinite(v));
   if (r) r.plan.forEach(v => values.push(v));
+  if (frozenSig !== null) measured.forEach(v => { if (Number.isFinite(v)) values.push(v); });
   if (values.length === 0) values.push(0, 200);
   let dMin = Math.min(...values), dMax = Math.max(...values);
   if (dMin === dMax) { dMin -= 10; dMax += 10; }
@@ -705,6 +1145,28 @@ function drawChart(r) {
       ctx.fillText(String(v), xAt(i), yAt(v) - 7);
     });
   }
+
+  // 实测坡线（橙色实线，冻结方案后叠画；坐标按冻结方案的点数展开）
+  if (frozenSig !== null && measured.length === frozenPlan.length &&
+      measured.every(v => Number.isFinite(v))) {
+    const fn = frozenPlan.length;
+    const fxAt = (i) => pad.l + (fn <= 1 ? w / 2 : w * i / (fn - 1));
+    ctx.strokeStyle = "#ef6c00";
+    ctx.lineWidth = 2.2;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    measured.forEach((v, i) => {
+      const x = fxAt(i), y = yAt(v);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    measured.forEach((v, i) => {
+      ctx.fillStyle = "#ef6c00";
+      ctx.beginPath();
+      ctx.arc(fxAt(i), yAt(v), 3.4, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
 }
 
 $("btnAdd").addEventListener("click", addPoint);
@@ -712,9 +1174,16 @@ $("btnRemove").addEventListener("click", removePoint);
 $("btnSample").addEventListener("click", loadSample);
 $("btnCalc").addEventListener("click", calculate);
 $("widthInput").addEventListener("input", scheduleCalc);
-window.addEventListener("resize", () => drawChart(lastResult));
+$("btnFreeze").addEventListener("click", freezePlan);
+$("btnReview").addEventListener("click", runReview);
+$("btnConfirm").addEventListener("click", confirmAcceptance);
+$("tolInput").addEventListener("input", onToleranceEdit);
+window.addEventListener("resize", () => {
+  drawChart(lastResult);
+});
 
 renderEditor();
+renderFreezeState();
 calculate();
 </script>
 </body>
